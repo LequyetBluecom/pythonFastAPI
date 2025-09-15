@@ -1,24 +1,49 @@
-# Python
+# ---- Python ----
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
-*.sqlite3
-
-# Virtual environment
-venv/
-.env/
-.venv/
-env/
-ENV/
-
-# IDE / Editor
-.vscode/
-.idea/
-
-# Logs
+*.so
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
 *.log
 
-# OS files
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# ---- FastAPI / Uvicorn ----
+*.sqlite3
+*.db
+*.pid
+
+# ---- Docker ----
+*.pid
+*.seed
+*.pid.lock
+docker-compose.override.yml
+.docker/
+
+# ---- Editor / OS ----
+# VSCode
+.vscode/
+.history/
+# PyCharm
+.idea/
+# macOS
 .DS_Store
+# Windows
 Thumbs.db
+desktop.ini
+
+# ---- Testing ----
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+.mypy_cache/

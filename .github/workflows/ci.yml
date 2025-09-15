@@ -25,4 +25,4 @@ jobs:
         with:
           context: .
           push: true
-          tags: lequyet123/fastapi-app:latest
+          tags: quyetblueom/bluecom:latest

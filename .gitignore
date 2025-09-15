@@ -47,3 +47,18 @@ htmlcov/
 .pytest_cache/
 .tox/
 .mypy_cache/
+
+# Environment variables
+.env
+*.env
+
+# Jupyter Notebook
+*.ipynb_checkpoints
+
+# Logs
+*.log
+logs/
+
+# Coverage reports
+.coverage.*
+.cache/

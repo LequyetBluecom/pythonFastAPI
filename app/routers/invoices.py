@@ -1,11 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
 from app.models import User, Order, Payment, Invoice, UserRole, OrderStatus, PaymentStatus
 from app.schemas import InvoiceResponse
 from app.routers.auth import get_current_user
-import uuid
+from app.services.invoice_service import InvoiceService
+from app.services.email_service import EmailService
+import os
 from datetime import datetime
 
 router = APIRouter()
@@ -13,6 +16,7 @@ router = APIRouter()
 @router.post("/generate/{order_id}", response_model=InvoiceResponse)
 def generate_invoice(
     order_id: int,
+    send_email: bool = True,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -24,63 +28,55 @@ def generate_invoice(
             detail="Chỉ admin và kế toán mới có quyền phát hành hóa đơn"
         )
     
-    # Kiểm tra đơn hàng tồn tại và đã thanh toán
-    order = db.query(Order).filter(Order.id == order_id).first()
-    if not order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Không tìm thấy đơn hàng"
-        )
-    
-    if order.status != OrderStatus.PAID:
+    try:
+        # Sử dụng InvoiceService để tạo hóa đơn
+        invoice_service = InvoiceService(db)
+        invoice_result = invoice_service.generate_invoice(order_id)
+        
+        # Lấy thông tin hóa đơn vừa tạo
+        invoice = db.query(Invoice).filter(Invoice.id == invoice_result["invoice_id"]).first()
+        
+        # Gửi email nếu yêu cầu
+        if send_email:
+            try:
+                from app.models import Student, Order
+                order = db.query(Order).filter(Order.id == order_id).first()
+                student = db.query(Student).filter(Student.id == order.student_id).first()
+                parent = db.query(User).filter(User.id == student.user_id).first()
+                
+                email_service = EmailService()
+                email_service.send_invoice_email(
+                    recipient_email=parent.email,
+                    recipient_name=parent.name,
+                    invoice_data={
+                        'invoice_number': invoice.invoice_number,
+                        'invoice_code': invoice.invoice_code,
+                        'lookup_code': invoice.e_invoice_code,
+                        'student_name': student.name,
+                        'class_name': student.class_name,
+                        'description': order.description,
+                        'total_amount': invoice.total_amount
+                    },
+                    pdf_path=invoice.pdf_path,
+                    xml_path=invoice.xml_path
+                )
+            except Exception as email_error:
+                # Log error nhưng không fail việc tạo hóa đơn
+                print(f"Error sending invoice email: {email_error}")
+        
+        return invoice
+        
+    except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Đơn hàng chưa được thanh toán"
+            detail=str(e)
         )
-    
-    # Kiểm tra đã có hóa đơn chưa
-    existing_invoice = db.query(Invoice).filter(Invoice.order_id == order_id).first()
-    if existing_invoice:
+    except Exception as e:
+        print(f"Error generating invoice: {e}")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Đơn hàng đã có hóa đơn"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Lỗi hệ thống khi tạo hóa đơn"
         )
-    
-    # Lấy thông tin học sinh và phụ huynh
-    from app.models import Student
-    student = db.query(Student).filter(Student.id == order.student_id).first()
-    parent = db.query(User).filter(User.id == student.user_id).first()
-    
-    # Tạo số hóa đơn
-    invoice_number = f"HD{datetime.now().strftime('%Y%m%d')}{uuid.uuid4().hex[:6].upper()}"
-    
-    # Tính thuế (giả sử VAT 0% cho học phí)
-    tax_amount = 0
-    total_amount = order.amount + tax_amount
-    
-    # Tạo hóa đơn
-    db_invoice = Invoice(
-        order_id=order_id,
-        invoice_number=invoice_number,
-        customer_name=parent.name,
-        customer_address="",  # Có thể thêm trường địa chỉ vào User model
-        amount=order.amount,
-        tax_amount=tax_amount,
-        total_amount=total_amount
-    )
-    
-    db.add(db_invoice)
-    
-    # Cập nhật trạng thái đơn hàng
-    order.status = OrderStatus.INVOICED
-    
-    db.commit()
-    db.refresh(db_invoice)
-    
-    # TODO: Ở đây sẽ gọi API nhà cung cấp HĐĐT để phát hành thực tế
-    # và lưu file PDF/XML
-    
-    return db_invoice
 
 @router.get("/", response_model=List[InvoiceResponse])
 def get_invoices(
@@ -156,6 +152,16 @@ def download_invoice_pdf(
                     detail="Không có quyền tải hóa đơn này"
                 )
     
-    # TODO: Implement PDF generation using WeasyPrint
-    # For now, return a simple response
-    return {"message": "PDF generation will be implemented", "invoice_id": invoice_id}
+    # Kiểm tra file PDF có tồn tại không
+    if not invoice.pdf_path or not os.path.exists(invoice.pdf_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File PDF hóa đơn không tồn tại"
+        )
+    
+    # Trả về file PDF
+    return FileResponse(
+        path=invoice.pdf_path,
+        filename=f"hoadon_{invoice.invoice_number}.pdf",
+        media_type="application/pdf"
+    )

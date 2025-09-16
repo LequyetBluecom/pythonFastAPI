@@ -5,7 +5,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from app.database import SessionLocal, engine, get_db
 from app.models import Base
-from app.routers import auth, users, students, orders, payments, invoices
+from app.routers import auth, users, students, orders, payments, invoices, dashboard, print_management
 from fastapi.middleware.cors import CORSMiddleware
 
 # Tạo các bảng trong database
@@ -34,6 +34,8 @@ app.include_router(students.router, prefix="/api/students", tags=["Students"])
 app.include_router(orders.router, prefix="/api/orders", tags=["Orders"])
 app.include_router(payments.router, prefix="/api/payments", tags=["Payments"])
 app.include_router(invoices.router, prefix="/api/invoices", tags=["Invoices"])
+app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard & Reports"])
+app.include_router(print_management.router, prefix="/api/print", tags=["Print Management"])
 
 # Route chính
 @app.get("/")

@@ -6,9 +6,8 @@ from app.database import get_db, SessionLocal
 from app.models import User, Order, Payment, UserRole, PaymentStatus, OrderStatus
 from app.schemas import PaymentCreate, PaymentResponse, QRCodeResponse
 from app.routers.auth import get_current_user
-import qrcode
-import io
-import base64
+from app.services.payment_service import PaymentService
+from app.services.email_service import EmailService
 import uuid
 from decimal import Decimal
 
@@ -20,7 +19,7 @@ def create_qr_payment(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Tạo QR code cho thanh toán"""
+    """Tạo QR code cho thanh toán sử dụng PaymentService"""
     # Kiểm tra đơn hàng tồn tại
     order = db.query(Order).filter(Order.id == payment_data.order_id).first()
     if not order:
@@ -46,93 +45,85 @@ def create_qr_payment(
             detail="Đơn hàng đã được thanh toán hoặc đã có hóa đơn"
         )
     
-    # Tạo mã thanh toán duy nhất
-    payment_code = f"PAY-{uuid.uuid4().hex[:8].upper()}"
-    
-    # Tạo dữ liệu QR code (format đơn giản cho demo)
-    qr_data = f"PAYMENT:{payment_code}|AMOUNT:{payment_data.amount}|ORDER:{order.order_code}"
-    
-    # Tạo QR code image
-    qr = qrcode.QRCode(
-        version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_L,
-        box_size=10,
-        border=4,
-    )
-    qr.add_data(qr_data)
-    qr.make(fit=True)
-    
-    # Convert to base64 string
-    img = qr.make_image(fill_color="black", back_color="white")
-    buffer = io.BytesIO()
-    img.save(buffer, format='PNG')
-    qr_code_base64 = base64.b64encode(buffer.getvalue()).decode()
-    
-    # Lưu payment record
-    db_payment = Payment(
-        order_id=payment_data.order_id,
-        payment_code=payment_code,
-        amount=payment_data.amount,
-        payment_method=payment_data.payment_method,
-        qr_code_data=qr_data,
-        status=PaymentStatus.PENDING
-    )
-    
-    db.add(db_payment)
-    db.commit()
-    db.refresh(db_payment)
-    
-    return QRCodeResponse(
-        payment_id=db_payment.id,
-        qr_code_data=f"data:image/png;base64,{qr_code_base64}",
-        amount=payment_data.amount,
-        order_code=order.order_code
-    )
+    try:
+        # Sử dụng PaymentService để tạo thanh toán
+        payment_service = PaymentService(db)
+        payment_response = payment_service.create_payment_request(
+            order_id=payment_data.order_id,
+            amount=payment_data.amount
+        )
+        
+        return QRCodeResponse(
+            payment_id=payment_response["payment_id"],
+            qr_code_data=payment_response["qr_code_image"],
+            amount=payment_data.amount,
+            order_code=payment_response["order_code"]
+        )
+        
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Lỗi hệ thống khi tạo thanh toán"
+        )
 
 @router.post("/webhook")
 def payment_webhook(webhook_data: dict, db: Session = Depends(get_db)):
     """Webhook nhận thông báo thanh toán từ cổng thanh toán"""
-    # TODO: Verify webhook signature trong production
-    # if not verify_webhook_signature(webhook_data, headers):
-    #     raise HTTPException(status_code=401, detail="Invalid signature")
-    
-    payment_code = webhook_data.get("payment_code")
-    webhook_status = webhook_data.get("status")
-    
-    if not payment_code or not webhook_status:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Dữ liệu webhook không hợp lệ"
-        )
-    
-    # Tìm payment record
-    payment = db.query(Payment).filter(Payment.payment_code == payment_code).first()
-    
-    if not payment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Không tìm thấy giao dịch thanh toán"
-        )
-    
-    # Kiểm tra idempotency (tránh xử lý trùng lặp)
-    if payment.status != PaymentStatus.PENDING:
-        return {"message": "Payment already processed", "current_status": payment.status}
-    
-    # Cập nhật trạng thái thanh toán
-    if webhook_status == "success":
-        payment.status = PaymentStatus.SUCCESS
-        payment.paid_at = func.now()
+    try:
+        # Sử dụng PaymentService để xử lý webhook
+        payment_service = PaymentService(db)
+        success = payment_service.process_webhook(webhook_data)
         
-        # Cập nhật trạng thái đơn hàng atomically
-        order = db.query(Order).filter(Order.id == payment.order_id).first()
-        if order:
-            order.status = OrderStatus.PAID
-    else:
-        payment.status = PaymentStatus.FAILED
-    
-    db.commit()
-    
-    return {"message": "Webhook processed successfully"}
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Không thể xử lý webhook"
+            )
+        
+        # Nếu thanh toán thành công, gửi email thông báo
+        if webhook_data.get("status") == "success":
+            try:
+                payment = db.query(Payment).filter(
+                    Payment.payment_code == webhook_data.get("payment_code")
+                ).first()
+                
+                if payment:
+                    order = db.query(Order).filter(Order.id == payment.order_id).first()
+                    if order:
+                        from app.models import Student
+                        student = db.query(Student).filter(Student.id == order.student_id).first()
+                        parent = db.query(User).filter(User.id == student.user_id).first()
+                        
+                        # Gửi email xác nhận thanh toán
+                        email_service = EmailService()
+                        email_service.send_payment_confirmation(
+                            recipient_email=parent.email,
+                            recipient_name=parent.name,
+                            payment_data={
+                                'payment_code': payment.payment_code,
+                                'amount': payment.amount,
+                                'student_name': student.name,
+                                'description': order.description,
+                                'paid_at': payment.paid_at.strftime('%d/%m/%Y %H:%M') if payment.paid_at else None
+                            }
+                        )
+            except Exception as email_error:
+                # Log error nhưng không fail webhook
+                print(f"Error sending payment confirmation email: {email_error}")
+        
+        return {"message": "Webhook xử lý thành công"}
+        
+    except Exception as e:
+        print(f"Error processing webhook: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Lỗi hệ thống khi xử lý webhook"
+        )
 
 @router.get("/", response_model=List[PaymentResponse])
 def get_payments(

@@ -29,3 +29,4 @@ qrcode
 sqlalchemy
 uvicorn[standard]==0.30.6
 weasyprint
+requests

@@ -3,7 +3,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from datetime import timedelta
 from app.database import get_db
-from app.models import User
+from app.models import User, UserRole
 from app.schemas import LoginRequest, Token, UserCreate, UserResponse
 from app.auth import verify_password, create_access_token, verify_token, get_password_hash
 

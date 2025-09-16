@@ -1,2 +1,16 @@
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
+aiofiles
+alembic
+bcrypt
+email-validator
+jinja2
+passlib
+pillow
+python-dotenv
+python-jose[cryptography]
+python-multipart
+qrcode
+sqlalchemy
+weasyprint
+email-validator

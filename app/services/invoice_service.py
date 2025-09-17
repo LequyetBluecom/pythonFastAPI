@@ -10,9 +10,8 @@ from decimal import Decimal
 from typing import Dict, Optional
 import requests
 import hashlib
-from weasyprint import HTML, CSS
 from sqlalchemy.orm import Session
-from app.models import Invoice, Order, User, Student
+from app.models import Invoice, Order, User, Student, OrderStatus
 from jinja2 import Environment, FileSystemLoader
 
 class EInvoiceProvider:
@@ -122,7 +121,7 @@ class InvoiceService:
         """Tạo hóa đơn điện tử cho đơn hàng đã thanh toán"""
         # Lấy thông tin đơn hàng
         order = self.db.query(Order).filter(Order.id == order_id).first()
-        if not order or order.status != "PAID":
+        if not order or order.status != OrderStatus.PAID:
             raise ValueError("Đơn hàng chưa được thanh toán")
             
         # Lấy thông tin học sinh và phụ huynh
@@ -171,7 +170,7 @@ class InvoiceService:
         self.db.add(invoice)
         
         # Cập nhật order status
-        order.status = "INVOICED"
+        order.status = OrderStatus.INVOICED
         
         self.db.commit()
         self.db.refresh(invoice)
@@ -197,6 +196,12 @@ class InvoiceService:
         
     def _generate_pdf(self, invoice: Invoice, data: Dict) -> str:
         """Tạo PDF hóa đơn sử dụng WeasyPrint"""
+        # Lazy import WeasyPrint to avoid hard dependency at app startup
+        try:
+            from weasyprint import HTML  # type: ignore
+        except Exception:
+            HTML = None  # type: ignore
+        
         # Tạo template HTML nếu chưa có
         self._ensure_invoice_template()
         
@@ -213,14 +218,20 @@ class InvoiceService:
             generated_at=datetime.now()
         )
         
-        # Tạo PDF
         pdf_dir = "invoices/pdf"
         os.makedirs(pdf_dir, exist_ok=True)
         pdf_path = f"{pdf_dir}/invoice_{invoice.id}.pdf"
         
-        HTML(string=html_content).write_pdf(pdf_path)
+        if HTML is not None:
+            # Generate real PDF if WeasyPrint is available
+            HTML(string=html_content).write_pdf(pdf_path)
+            return pdf_path
         
-        return pdf_path
+        # Fallback: save HTML alongside (no PDF engine available)
+        html_fallback_path = f"{pdf_dir}/invoice_{invoice.id}.html"
+        with open(html_fallback_path, "w", encoding="utf-8") as f:
+            f.write(html_content)
+        return html_fallback_path
         
     def _save_xml(self, xml_content: str, invoice_id: int) -> str:
         """Lưu file XML hóa đơn"""

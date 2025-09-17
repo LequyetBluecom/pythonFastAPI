@@ -5,9 +5,8 @@ Hỗ trợ in hóa đơn qua LAN/WAN và quản lý máy in
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from app.database import get_db
+from app.core.dependencies import get_db, get_current_user
 from app.models import User, UserRole, Printer, PrintJob, PrinterAgent
-from app.routers.auth import get_current_user
 from app.services.print_service import PrintJobService, PrinterService, PrintAgentService
 from pydantic import BaseModel
 

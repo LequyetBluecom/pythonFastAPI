@@ -12,5 +12,8 @@ python-jose[cryptography]
 python-multipart
 qrcode
 sqlalchemy
-weasyprint
 requests
+requests
+
+# Optional (for PDF invoice rendering). On Windows requires extra native deps.
+# weasyprint

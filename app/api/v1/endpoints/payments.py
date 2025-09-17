@@ -2,10 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 from typing import List
-from app.database import get_db, SessionLocal
+from app.core.dependencies import get_db, get_current_user
 from app.models import User, Order, Payment, UserRole, PaymentStatus, OrderStatus
 from app.schemas import PaymentCreate, PaymentResponse, QRCodeResponse
-from app.routers.auth import get_current_user
 from app.services.payment_service import PaymentService
 from app.services.email_service import EmailService
 import uuid

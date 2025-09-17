@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     DB_ECHO: bool = os.getenv("DB_ECHO", "false").lower() == "true"
     
     # CORS
-    ALLOWED_HOSTS: list = ["https://*.replit.app", "https://*.replit.dev"]
+    ALLOWED_ORIGINS: list = []  # set via ENV: comma-separated
     
     # External Services
     PAYMENT_GATEWAY_URL: str = os.getenv("PAYMENT_GATEWAY_URL", "https://api.demo-payment.com")
@@ -60,7 +60,7 @@ class Settings(BaseSettings):
     @property
     def database_url(self) -> str:
         """Get database URL with SQLite fallback"""
-        if self.DATABASE_URL and not self.DATABASE_URL.startswith("postgresql://postgres:password@helium"):
+        if self.DATABASE_URL:
             return self.DATABASE_URL
         return "sqlite:///./school_payment.db"
 
@@ -68,6 +68,14 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         """Check if running in production"""
         return self.ENVIRONMENT.lower() == "production"
+
+    @property
+    def allowed_origins(self) -> list:
+        """Compute allowed CORS origins from env (comma-separated)"""
+        env_val = os.getenv("ALLOWED_ORIGINS", "")
+        if not env_val:
+            return ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5000", "http://127.0.0.1:5000"]
+        return [o.strip() for o in env_val.split(",") if o.strip()]
 
 
 # Global settings instance

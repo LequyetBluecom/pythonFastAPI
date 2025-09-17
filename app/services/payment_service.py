@@ -11,7 +11,7 @@ import requests
 from typing import Dict, Optional
 from decimal import Decimal
 from sqlalchemy.orm import Session
-from app.models import Payment, Order, PaymentStatus
+from app.models import Payment, Order, PaymentStatus, OrderStatus
 from datetime import datetime
 
 class PaymentGatewayService:
@@ -39,7 +39,7 @@ class PaymentGatewayService:
             "description": f"Thanh toán {order.description}",
             "order_id": order.order_code,
             "return_url": f"{os.getenv('BASE_URL', 'http://localhost:5000')}/payments/return",
-            "notify_url": f"{os.getenv('BASE_URL', 'http://localhost:5000')}/api/payments/webhook"
+            "notify_url": f"{os.getenv('BASE_URL', 'http://localhost:5000')}/api/v1/payments/webhook"
         }
         
         # Trong production sẽ gọi API thật
@@ -159,7 +159,7 @@ class PaymentService:
             # Cập nhật order status
             order = self.db.query(Order).filter(Order.id == payment.order_id).first()
             if order:
-                order.status = "PAID"
+                order.status = OrderStatus.PAID
                 
         elif status == "failed":
             payment.status = PaymentStatus.FAILED

@@ -1,39 +1,60 @@
+"""
+Main FastAPI application with improved structure
+"""
 import os
 import uvicorn
-from fastapi import FastAPI, Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.orm import Session
-from app.database import SessionLocal, engine, get_db
-from app.models import Base
-from app.routers import auth, users, students, orders, payments, invoices
+from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
-# Tạo các bảng trong database
+from app.core.config import settings
+from app.core.exceptions import (
+    AppException, 
+    app_exception_handler, 
+    http_exception_handler,
+    validation_exception_handler,
+    generic_exception_handler
+)
+from app.database import Base, engine
+from app.api.v1.api import api_router
+
+# Create database tables
 Base.metadata.create_all(bind=engine)
 
-# Khởi tạo app
+# Initialize FastAPI app with settings
 app = FastAPI(
-    title="Hệ thống Thanh toán QR Trường học",
-    description="API cho hệ thống thanh toán học phí và phát hành hóa đơn điện tử",
-    version="1.0.0"
+    title=settings.APP_NAME,
+    description=settings.APP_DESCRIPTION,
+    version=settings.APP_VERSION,
+    debug=settings.DEBUG
 )
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Trong production, chỉ định cụ thể domain
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Add exception handlers
+app.add_exception_handler(AppException, app_exception_handler)
+app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(Exception, generic_exception_handler)
 
-# Include routers
-app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
-app.include_router(users.router, prefix="/api/users", tags=["Users"])
-app.include_router(students.router, prefix="/api/students", tags=["Students"])
-app.include_router(orders.router, prefix="/api/orders", tags=["Orders"])
-app.include_router(payments.router, prefix="/api/payments", tags=["Payments"])
-app.include_router(invoices.router, prefix="/api/invoices", tags=["Invoices"])
+# CORS middleware  
+if settings.ENVIRONMENT == "production":
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"https://.*\.replit\.(app|dev)$",
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        allow_headers=["*"],
+    )
+else:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5000", "http://127.0.0.1:5000"],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        allow_headers=["*"],
+    )
+
+# Include API v1 router
+app.include_router(api_router, prefix="/api/v1")
 
 # Route chính
 @app.get("/")

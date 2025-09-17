@@ -2,10 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 from typing import List
-from app.database import get_db, SessionLocal
+from app.core.dependencies import get_db, get_current_user
 from app.models import User, Order, Payment, UserRole, PaymentStatus, OrderStatus
 from app.schemas import PaymentCreate, PaymentResponse, QRCodeResponse
-from app.routers.auth import get_current_user
 from app.services.payment_service import PaymentService
 from app.services.email_service import EmailService
 import uuid
@@ -13,7 +12,28 @@ from decimal import Decimal
 
 router = APIRouter()
 
-@router.post("/create-qr", response_model=QRCodeResponse)
+@router.post(
+    "/create-qr",
+    response_model=QRCodeResponse,
+    summary="Tạo QR thanh toán",
+    description="Sinh mã QR để phụ huynh quét và thanh toán học phí cho đơn hàng.",
+    openapi_extra={
+        "x-codeSamples": [
+            {
+                "lang": "cURL",
+                "source": "curl -X POST 'http://localhost:5000/api/v1/payments/create-qr' -H 'Authorization: Bearer <ACCESS_TOKEN>' -H 'Content-Type: application/json' -d '{\\n  \\\"order_id\\\": 1,\\n  \\\"amount\\\": 100000\\n}'"
+            },
+            {
+                "lang": "JavaScript (fetch)",
+                "source": "fetch('http://localhost:5000/api/v1/payments/create-qr', { method: 'POST', headers: { 'Authorization': 'Bearer <ACCESS_TOKEN>', 'Content-Type': 'application/json' }, body: JSON.stringify({ order_id: 1, amount: 100000 }) }).then(r => r.json()).then(console.log);"
+            },
+            {
+                "lang": "PHP (cURL)",
+                "source": "$ch = curl_init('http://localhost:5000/api/v1/payments/create-qr');\\n$payload = json_encode(['order_id'=>1,'amount'=>100000]);\\ncurl_setopt_array($ch, [CURLOPT_POST=>true, CURLOPT_HTTPHEADER=>['Authorization: Bearer <ACCESS_TOKEN>','Content-Type: application/json'], CURLOPT_POSTFIELDS=>$payload, CURLOPT_RETURNTRANSFER=>true]);\\n$resp = curl_exec($ch); curl_close($ch); echo $resp;"
+            }
+        ]
+    }
+)
 def create_qr_payment(
     payment_data: PaymentCreate,
     current_user: User = Depends(get_current_user),
@@ -71,7 +91,19 @@ def create_qr_payment(
             detail="Lỗi hệ thống khi tạo thanh toán"
         )
 
-@router.post("/webhook")
+@router.post(
+    "/webhook",
+    summary="Webhook thanh toán",
+    description="Cổng thanh toán gọi vào endpoint này để báo kết quả giao dịch (server-to-server).",
+    openapi_extra={
+        "x-codeSamples": [
+            {
+                "lang": "cURL",
+                "source": "curl -X POST 'http://localhost:5000/api/v1/payments/webhook' -H 'Content-Type: application/json' -d '{\\n  \\\"transaction_id\\\": \\\"TXN-XXXX\\\",\\n  \\\"status\\\": \\\"success\\\"\\n}'"
+            }
+        ]
+    }
+)
 def payment_webhook(webhook_data: dict, db: Session = Depends(get_db)):
     """Webhook nhận thông báo thanh toán từ cổng thanh toán"""
     try:
@@ -125,7 +157,12 @@ def payment_webhook(webhook_data: dict, db: Session = Depends(get_db)):
             detail="Lỗi hệ thống khi xử lý webhook"
         )
 
-@router.get("/", response_model=List[PaymentResponse])
+@router.get(
+    "/",
+    response_model=List[PaymentResponse],
+    summary="Danh sách thanh toán",
+    description="Trả về danh sách giao dịch thanh toán. Phụ huynh chỉ xem được giao dịch của con mình."
+)
 def get_payments(
     skip: int = 0,
     limit: int = 100,
@@ -145,7 +182,12 @@ def get_payments(
     
     return payments
 
-@router.get("/{payment_id}", response_model=PaymentResponse)
+@router.get(
+    "/{payment_id}",
+    response_model=PaymentResponse,
+    summary="Chi tiết thanh toán",
+    description="Trả thông tin chi tiết của một giao dịch thanh toán."
+)
 def get_payment(
     payment_id: int,
     current_user: User = Depends(get_current_user),

@@ -12,21 +12,7 @@ python-jose[cryptography]
 python-multipart
 qrcode
 sqlalchemy
-weasyprint
-email-validator
-aiofiles
-alembic
-bcrypt
-email-validator
-fastapi==0.115.0
-jinja2
-passlib
-pillow
-python-dotenv
-python-jose[cryptography]
-python-multipart
-qrcode
-sqlalchemy
-uvicorn[standard]==0.30.6
-weasyprint
 requests
+pydantic-settings
+# Optional (for PDF invoice rendering). On Windows requires extra native deps.
+# weasyprint

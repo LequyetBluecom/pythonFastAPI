@@ -6,9 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import datetime, timedelta
-from app.database import get_db
+from app.core.dependencies import get_db, get_current_user
 from app.models import User, UserRole
-from app.routers.auth import get_current_user
 from app.services.dashboard_service import DashboardService
 
 router = APIRouter()

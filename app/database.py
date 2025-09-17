@@ -1,34 +1,36 @@
+"""
+Database configuration and session management
+"""
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-import os
+from typing import Generator
 
-# Cấu hình database: ưu tiên SQLite cho development
-database_url = os.getenv("DATABASE_URL")
+from app.core.config import settings
 
-# Chỉ sử dụng external database nếu được cấu hình rõ ràng và không phải PostgreSQL default của Replit
-if database_url and not database_url.startswith("postgresql://postgres:password@helium"):
-    if database_url.startswith("sqlite"):
-        SQLALCHEMY_DATABASE_URL = database_url
-        engine = create_engine(
-            SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
-        )
-    else:
-        # MySQL hoặc PostgreSQL khác
-        SQLALCHEMY_DATABASE_URL = database_url
-        engine = create_engine(SQLALCHEMY_DATABASE_URL)
-else:
-    # Mặc định SQLite cho development
-    SQLALCHEMY_DATABASE_URL = "sqlite:///./school_payment.db"
+# Create database engine
+if settings.database_url.startswith("sqlite"):
     engine = create_engine(
-        SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+        settings.database_url,
+        connect_args={"check_same_thread": False},
+        echo=settings.DB_ECHO
+    )
+else:
+    # PostgreSQL or other databases
+    engine = create_engine(
+        settings.database_url,
+        echo=settings.DB_ECHO
     )
 
+# Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Create declarative base
 Base = declarative_base()
 
-# Dependency để lấy database session
-def get_db():
+# Database dependency (moved to core.dependencies for better organization)
+def get_db() -> Generator:
+    """Get database session"""
     db = SessionLocal()
     try:
         yield db

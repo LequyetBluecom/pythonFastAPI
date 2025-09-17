@@ -36,4 +36,8 @@ externalPort = 80
 
 [deployment]
 deploymentTarget = "autoscale"
+<<<<<<< HEAD
 run = ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "5000", "--workers"]
+=======
+run = ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "5000", "--workers", "2", "--proxy-headers", "--forwarded-allow-ips=*"]
+>>>>>>> db6ad1e97a67e32320d95e83de74d9027051131c

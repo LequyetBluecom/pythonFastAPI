@@ -193,6 +193,63 @@ class InvoiceService:
             "pdf_path": pdf_path,
             "xml_path": xml_path
         }
+
+    def resend_invoice_email(self, invoice_id: int) -> bool:
+        invoice = self.db.query(Invoice).filter(Invoice.id == invoice_id).first()
+        if not invoice:
+            raise ValueError("Không tìm thấy hóa đơn")
+        from app.models import Order, Student, User
+        order = self.db.query(Order).filter(Order.id == invoice.order_id).first()
+        student = self.db.query(Student).filter(Student.id == order.student_id).first() if order else None
+        parent = self.db.query(User).filter(User.id == student.user_id).first() if student else None
+        if not (order and student and parent):
+            raise ValueError("Thiếu thông tin để gửi email hóa đơn")
+        from app.services.email_service import EmailService
+        email_service = EmailService()
+        return email_service.send_invoice_email(
+            recipient_email=parent.email,
+            recipient_name=parent.name,
+            invoice_data={
+                'invoice_number': invoice.invoice_number,
+                'invoice_code': invoice.invoice_code,
+                'lookup_code': invoice.e_invoice_code,
+                'student_name': student.name,
+                'class_name': student.class_name,
+                'description': order.description,
+                'total_amount': invoice.total_amount
+            },
+            pdf_path=invoice.pdf_path,
+            xml_path=invoice.xml_path
+        )
+
+    def rerender_pdf(self, invoice_id: int) -> str:
+        invoice = self.db.query(Invoice).filter(Invoice.id == invoice_id).first()
+        if not invoice:
+            raise ValueError("Không tìm thấy hóa đơn")
+        from app.models import Order, Student, User
+        order = self.db.query(Order).filter(Order.id == invoice.order_id).first()
+        student = self.db.query(Student).filter(Student.id == order.student_id).first() if order else None
+        parent = self.db.query(User).filter(User.id == student.user_id).first() if student else None
+        if not (order and student and parent):
+            raise ValueError("Thiếu thông tin để render PDF")
+        data = {
+            "invoice_number": invoice.invoice_number,
+            "customer_name": invoice.customer_name,
+            "customer_tax_code": invoice.customer_tax_code or "",
+            "customer_address": invoice.customer_address or "",
+            "description": order.description,
+            "amount": invoice.amount,
+            "tax_rate": 0,
+            "tax_amount": invoice.tax_amount,
+            "total_amount": invoice.total_amount,
+            "student_name": student.name,
+            "student_code": student.student_code,
+            "class_name": student.class_name
+        }
+        pdf_path = self._generate_pdf(invoice, data)
+        invoice.pdf_path = pdf_path
+        self.db.commit()
+        return pdf_path
         
     def _generate_pdf(self, invoice: Invoice, data: Dict) -> str:
         """Tạo PDF hóa đơn sử dụng WeasyPrint"""

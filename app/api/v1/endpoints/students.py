@@ -1,28 +1,32 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
+from app.core.responses import paginated_response
 from app.core.dependencies import get_db, get_current_user
 from app.models import User, Student, UserRole
 from app.schemas import StudentCreate, StudentResponse
 
 router = APIRouter()
 
-@router.get("/", response_model=List[StudentResponse])
+@router.get("/")
 def get_students(
     skip: int = 0,
     limit: int = 100,
+    q: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Lấy danh sách học sinh"""
+    query = db.query(Student)
+    if q:
+        like = f"%{q}%"
+        query = query.filter((Student.name.ilike(like)) | (Student.student_code.ilike(like)) | (Student.class_name.ilike(like)))
     if current_user.role == UserRole.PARENT:
         # Phụ huynh chỉ xem được học sinh của mình
-        students = db.query(Student).filter(Student.user_id == current_user.id).all()
-    else:
-        # Admin, kế toán, giáo vụ xem được tất cả
-        students = db.query(Student).offset(skip).limit(limit).all()
-    
-    return students
+        query = query.filter(Student.user_id == current_user.id)
+    total = query.count()
+    data = query.offset(skip).limit(limit).all()
+    return paginated_response(data=data, total=total, page=(skip // max(limit,1)) + 1, per_page=limit)
 
 @router.post("/", response_model=StudentResponse)
 def create_student(
@@ -93,3 +97,39 @@ def get_student(
         )
     
     return student
+
+@router.put("/{student_id}", response_model=StudentResponse)
+def update_student(
+    student_id: int,
+    student_data: StudentCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role not in [UserRole.ADMIN, UserRole.TEACHER]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Không có quyền")
+    student = db.query(Student).filter(Student.id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy học sinh")
+    student.name = student_data.name
+    student.student_code = student_data.student_code
+    student.class_name = student_data.class_name
+    student.grade = student_data.grade
+    student.user_id = student_data.user_id
+    db.commit()
+    db.refresh(student)
+    return student
+
+@router.delete("/{student_id}")
+def delete_student(
+    student_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role not in [UserRole.ADMIN, UserRole.TEACHER]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Không có quyền")
+    student = db.query(Student).filter(Student.id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy học sinh")
+    db.delete(student)
+    db.commit()
+    return {"message": "Đã xóa học sinh"}

@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
-from typing import List
-from app.core.dependencies import get_db, get_current_user
+from typing import List, Optional
+from app.core.responses import paginated_response
+from fastapi import Request
+from app.core.dependencies import get_db, get_current_user, rate_limiter
 from app.models import User, Order, Payment, UserRole, PaymentStatus, OrderStatus
 from app.schemas import PaymentCreate, PaymentResponse, QRCodeResponse
 from app.services.payment_service import PaymentService
@@ -104,9 +106,13 @@ def create_qr_payment(
         ]
     }
 )
-def payment_webhook(webhook_data: dict, db: Session = Depends(get_db)):
+def payment_webhook(webhook_data: dict, request: Request, db: Session = Depends(get_db), _: bool = Depends(rate_limiter(limit=60, window_seconds=60))):
     """Webhook nhận thông báo thanh toán từ cổng thanh toán"""
     try:
+        # Verify signature header
+        signature = request.headers.get("X-Signature", "")
+        if not PaymentService(db).gateway.verify_webhook(webhook_data, signature):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature")
         # Sử dụng PaymentService để xử lý webhook
         payment_service = PaymentService(db)
         success = payment_service.process_webhook(webhook_data)
@@ -159,28 +165,30 @@ def payment_webhook(webhook_data: dict, db: Session = Depends(get_db)):
 
 @router.get(
     "/",
-    response_model=List[PaymentResponse],
     summary="Danh sách thanh toán",
     description="Trả về danh sách giao dịch thanh toán. Phụ huynh chỉ xem được giao dịch của con mình."
 )
 def get_payments(
     skip: int = 0,
     limit: int = 100,
+    status_filter: Optional[str] = None,
+    q: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Lấy danh sách thanh toán"""
+    query = db.query(Payment)
+    if status_filter:
+        query = query.filter(Payment.status == status_filter)
+    if q:
+        query = query.filter(Payment.payment_code.ilike(f"%{q}%"))
     if current_user.role == UserRole.PARENT:
         # Phụ huynh chỉ xem thanh toán của học sinh mình
         from app.models import Student
-        payments = db.query(Payment).join(Order).join(Student).filter(
-            Student.user_id == current_user.id
-        ).offset(skip).limit(limit).all()
-    else:
-        # Admin, kế toán, giáo vụ xem được tất cả
-        payments = db.query(Payment).offset(skip).limit(limit).all()
-    
-    return payments
+        query = query.join(Order).join(Student).filter(Student.user_id == current_user.id)
+    total = query.count()
+    data = query.offset(skip).limit(limit).all()
+    return paginated_response(data=data, total=total, page=(skip // max(limit,1)) + 1, per_page=limit)
 
 @router.get(
     "/{payment_id}",
@@ -214,3 +222,44 @@ def get_payment(
                 )
     
     return payment
+
+
+@router.post("/{payment_id}/confirm", summary="Xác nhận thanh toán thủ công")
+def manual_confirm_payment(
+    payment_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role not in [UserRole.ADMIN, UserRole.ACCOUNTANT]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Không có quyền")
+    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    if not payment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy giao dịch")
+    if payment.status == PaymentStatus.SUCCESS:
+        return {"message": "Giao dịch đã ở trạng thái thành công"}
+    payment.status = PaymentStatus.SUCCESS
+    payment.paid_at = func.now()
+    order = db.query(Order).filter(Order.id == payment.order_id).first()
+    if order and order.status == OrderStatus.PENDING:
+        order.status = OrderStatus.PAID
+    db.commit()
+    return {"message": "Đã xác nhận thanh toán thành công"}
+
+
+@router.post("/{payment_id}/refund", summary="Hoàn tiền (mock)")
+def refund_payment_mock(
+    payment_id: int,
+    reason: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role not in [UserRole.ADMIN, UserRole.ACCOUNTANT]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Không có quyền")
+    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    if not payment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy giao dịch")
+    payment.status = PaymentStatus.FAILED
+    note = f"REFUND:{reason or 'manual'}"
+    payment.gateway_txn_id = (payment.gateway_txn_id or '') + (f"|{note}" if payment.gateway_txn_id else note)
+    db.commit()
+    return {"message": "Đã đánh dấu hoàn tiền (mock)"}

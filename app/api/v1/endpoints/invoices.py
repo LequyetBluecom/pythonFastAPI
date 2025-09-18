@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
+from app.core.responses import paginated_response
 from app.core.dependencies import get_db, get_current_user
 from app.models import User, Order, Payment, Invoice, UserRole, OrderStatus, PaymentStatus
 from app.schemas import InvoiceResponse
@@ -77,25 +78,37 @@ def generate_invoice(
             detail="Lỗi hệ thống khi tạo hóa đơn"
         )
 
-@router.get("/", response_model=List[InvoiceResponse])
+@router.get("/")
 def get_invoices(
     skip: int = 0,
     limit: int = 100,
+    q: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Lấy danh sách hóa đơn"""
+    query = db.query(Invoice)
+    if q:
+        like = f"%{q}%"
+        query = query.filter((Invoice.invoice_number.ilike(like)) | (Invoice.e_invoice_code.ilike(like)))
     if current_user.role == UserRole.PARENT:
         # Phụ huynh chỉ xem hóa đơn của học sinh mình
         from app.models import Student
-        invoices = db.query(Invoice).join(Order).join(Student).filter(
-            Student.user_id == current_user.id
-        ).offset(skip).limit(limit).all()
-    else:
-        # Admin, kế toán, giáo vụ xem được tất cả
-        invoices = db.query(Invoice).offset(skip).limit(limit).all()
-    
-    return invoices
+        query = query.join(Order).join(Student).filter(Student.user_id == current_user.id)
+    total = query.count()
+    data = query.offset(skip).limit(limit).all()
+    return paginated_response(data=data, total=total, page=(skip // max(limit,1)) + 1, per_page=limit)
+
+@router.get("/lookup/{code}")
+def lookup_invoice_by_code(
+    code: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    invoice = db.query(Invoice).filter((Invoice.invoice_number == code) | (Invoice.e_invoice_code == code)).first()
+    if not invoice:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy hóa đơn")
+    return invoice
 
 @router.get("/{invoice_id}", response_model=InvoiceResponse)
 def get_invoice(
@@ -124,6 +137,38 @@ def get_invoice(
                 )
     
     return invoice
+
+@router.post("/{invoice_id}/resend")
+def resend_invoice(
+    invoice_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role not in [UserRole.ADMIN, UserRole.ACCOUNTANT]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Không có quyền")
+    try:
+        service = InvoiceService(db)
+        ok = service.resend_invoice_email(invoice_id)
+        if not ok:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Không thể gửi email hóa đơn")
+        return {"message": "Đã gửi lại email hóa đơn"}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+@router.post("/{invoice_id}/rerender")
+def rerender_invoice_pdf(
+    invoice_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role not in [UserRole.ADMIN, UserRole.ACCOUNTANT]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Không có quyền")
+    try:
+        service = InvoiceService(db)
+        pdf_path = service.rerender_pdf(invoice_id)
+        return {"message": "Đã render lại PDF", "pdf_path": pdf_path}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 @router.get("/{invoice_id}/pdf")
 def download_invoice_pdf(

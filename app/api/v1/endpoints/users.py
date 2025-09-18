@@ -1,23 +1,30 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from app.core.dependencies import get_db, get_current_user, require_admin
 from app.models import User, UserRole
 from app.schemas import UserCreate, UserResponse
 from app.core.security import get_password_hash
+from app.core.responses import paginated_response, success_response
 
 router = APIRouter()
 
-@router.get("/", response_model=List[UserResponse])
+@router.get("/")
 def get_users(
     skip: int = 0, 
     limit: int = 100,
+    q: Optional[str] = None,
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db)
 ):
     """Lấy danh sách tất cả users (chỉ admin)"""
-    users = db.query(User).offset(skip).limit(limit).all()
-    return users
+    query = db.query(User)
+    if q:
+        like = f"%{q}%"
+        query = query.filter((User.name.ilike(like)) | (User.email.ilike(like)))
+    total = query.count()
+    data = query.offset(skip).limit(limit).all()
+    return paginated_response(data=data, total=total, page=(skip // max(limit,1)) + 1, per_page=limit)
 
 @router.post("/", response_model=UserResponse)
 def create_user(
@@ -72,3 +79,36 @@ def get_user(
         )
     
     return user
+
+@router.put("/{user_id}", response_model=UserResponse)
+def update_user(
+    user_id: int,
+    user_data: UserCreate,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy user")
+    user.name = user_data.name
+    user.email = user_data.email
+    user.phone = user_data.phone
+    user.role = user_data.role
+    if user_data.password:
+        user.hashed_password = get_password_hash(user_data.password)
+    db.commit()
+    db.refresh(user)
+    return user
+
+@router.delete("/{user_id}")
+def delete_user(
+    user_id: int,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy user")
+    db.delete(user)
+    db.commit()
+    return {"message": "Đã xóa user"}

@@ -77,15 +77,13 @@ class PaymentGatewayService:
         
     def verify_webhook(self, webhook_data: Dict, signature: str) -> bool:
         """Xác minh webhook signature từ cổng thanh toán"""
-        # Trong production sẽ verify signature thật
-        # expected_signature = hmac.new(
-        #     self.webhook_secret.encode(),
-        #     json.dumps(webhook_data).encode(),
-        #     hashlib.sha256
-        # ).hexdigest()
-        # return hmac.compare_digest(expected_signature, signature)
-        
-        return True  # Mock cho development
+        import hashlib, hmac, json
+        secret = os.getenv("PAYMENT_WEBHOOK_SECRET", "dev-secret")
+        try:
+            expected = hmac.new(secret.encode(), json.dumps(webhook_data, separators=(",", ":")).encode(), hashlib.sha256).hexdigest()
+            return hmac.compare_digest(expected, signature or "")
+        except Exception:
+            return False
         
 class PaymentService:
     """Service xử lý business logic thanh toán"""

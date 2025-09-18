@@ -19,6 +19,13 @@ class PrinterCreate(BaseModel):
     ip_address: Optional[str] = ""
     printer_type: Optional[str] = "NETWORK"
 
+class PrinterUpdate(BaseModel):
+    name: Optional[str] = None
+    location: Optional[str] = None
+    ip_address: Optional[str] = None
+    printer_type: Optional[str] = None
+    is_active: Optional[bool] = None
+
 class PrinterResponse(BaseModel):
     id: int
     name: str
@@ -97,6 +104,39 @@ def create_printer(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Lỗi hệ thống khi tạo máy in"
         )
+
+@router.put("/printers/{printer_id}", response_model=PrinterResponse)
+def update_printer(
+    printer_id: int,
+    payload: PrinterUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role not in [UserRole.ADMIN, UserRole.ACCOUNTANT]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Không có quyền")
+    printer = db.query(Printer).filter(Printer.id == printer_id).first()
+    if not printer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy máy in")
+    for field, value in payload.dict(exclude_unset=True).items():
+        setattr(printer, field, value)
+    db.commit()
+    db.refresh(printer)
+    return printer
+
+@router.delete("/printers/{printer_id}")
+def delete_printer(
+    printer_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Chỉ admin mới có quyền")
+    printer = db.query(Printer).filter(Printer.id == printer_id).first()
+    if not printer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy máy in")
+    db.delete(printer)
+    db.commit()
+    return {"message": "Đã xóa máy in"}
 
 @router.get("/printers/discover")
 def discover_printers(
@@ -184,6 +224,23 @@ def retry_print_job(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Chỉ admin và kế toán mới có quyền retry job in"
         )
+
+@router.post("/jobs/{job_id}/cancel")
+def cancel_print_job(
+    job_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.role not in [UserRole.ADMIN, UserRole.ACCOUNTANT]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Không có quyền")
+    job = db.query(PrintJob).filter(PrintJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy job")
+    if job.status in ["completed", "failed"]:
+        return {"message": "Job đã kết thúc"}
+    job.status = "failed"
+    db.commit()
+    return {"message": "Đã hủy job in"}
     
     try:
         print_service = PrintJobService(db)

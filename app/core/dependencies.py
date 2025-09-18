@@ -1,8 +1,8 @@
 """
 Common dependencies for FastAPI endpoints
 """
-from typing import Generator
-from fastapi import Depends, HTTPException, status
+from typing import Generator, Callable
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
@@ -101,3 +101,27 @@ def require_staff(
             detail="Chỉ nhân viên mới có quyền truy cập"
         )
     return current_user
+
+# Simple in-memory rate limiter (per-process)
+_rate_limit_store = {}
+
+def rate_limiter(limit: int = 30, window_seconds: int = 60) -> Callable:
+    """Return a dependency that rate-limits by client IP for given window."""
+    from time import time
+    def _dep(request: Request):
+        client_ip = request.client.host if request.client else "unknown"
+        now = int(time())
+        window_start = now - window_seconds
+        records = _rate_limit_store.setdefault(client_ip, [])
+        # Remove old entries
+        while records and records[0] < window_start:
+            records.pop(0)
+        if len(records) >= limit:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit exceeded"
+            )
+        records.append(now)
+        _rate_limit_store[client_ip] = records
+        return True
+    return _dep

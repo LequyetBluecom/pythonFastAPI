@@ -1,13 +1,22 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from datetime import timedelta
+from datetime import timedelta, datetime
+import os
+import uuid
 
 from app.core.dependencies import get_db, get_current_user
-from app.core.security import verify_password, create_access_token, get_password_hash, verify_token
+from app.core.security import (
+    verify_password, create_access_token, get_password_hash, verify_token,
+    create_refresh_token, verify_refresh_token
+)
 from app.core.responses import success_response, created_response, error_response
-from app.models import User, UserRole
-from app.schemas import LoginRequest, Token, UserCreate, UserResponse
+from app.models import User, UserRole, PasswordResetToken
+from app.schemas import (
+    LoginRequest, Token, UserCreate, UserResponse,
+    ChangePasswordRequest, ForgotPasswordRequest, ResetPasswordRequest
+)
+from app.services.email_service import EmailService
 
 router = APIRouter()
 
@@ -53,9 +62,10 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
         data={"sub": user.email, "user_id": user.id, "role": user.role.value},
         expires_delta=access_token_expires
     )
+    refresh_token = create_refresh_token(user_id=user.id)
     
     return success_response(
-        data={"access_token": access_token, "token_type": "bearer"},
+        data={"access_token": access_token, "token_type": "bearer", "refresh_token": refresh_token},
         message="Đăng nhập thành công"
     )
 
@@ -157,3 +167,58 @@ def get_current_user_info(current_user: User = Depends(get_current_user)):
         data=user_response,
         message="Thông tin user hiện tại"
     )
+
+
+@router.post("/change-password", summary="Đổi mật khẩu")
+def change_password(payload: ChangePasswordRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not verify_password(payload.old_password, current_user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mật khẩu hiện tại không đúng")
+    current_user.hashed_password = get_password_hash(payload.new_password)
+    db.commit()
+    return success_response(message="Đổi mật khẩu thành công")
+
+
+@router.post("/forgot-password", summary="Quên mật khẩu")
+def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == payload.email).first()
+    # Không tiết lộ tồn tại hay không
+    if user:
+        token_str = uuid.uuid4().hex
+        expires = datetime.utcnow() + timedelta(hours=1)
+        token = PasswordResetToken(user_id=user.id, token=token_str, expires_at=expires)
+        db.add(token)
+        db.commit()
+        reset_url = f"{os.getenv('BASE_URL', 'http://localhost:5000')}/reset-password?token={token_str}"
+        try:
+            EmailService().send_password_reset(user.email, user.name, reset_url)
+        except Exception:
+            pass
+    return success_response(message="Nếu email tồn tại, đường dẫn đặt lại đã được gửi")
+
+
+@router.post("/reset-password", summary="Đặt lại mật khẩu")
+def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
+    token = db.query(PasswordResetToken).filter(PasswordResetToken.token == payload.token, PasswordResetToken.used == False).first()
+    if not token or token.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Token không hợp lệ hoặc đã hết hạn")
+    user = db.query(User).filter(User.id == token.user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy user")
+    user.hashed_password = get_password_hash(payload.new_password)
+    token.used = True
+    db.commit()
+    return success_response(message="Đặt lại mật khẩu thành công")
+
+
+@router.post("/refresh", response_model=Token, summary="Làm mới access token")
+def refresh_token_endpoint(refresh_token: str, db: Session = Depends(get_db)):
+    payload = verify_refresh_token(refresh_token)
+    user_id = int(payload.get("sub"))
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token không hợp lệ")
+    from app.core.config import settings
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(data={"sub": user.email, "user_id": user.id, "role": user.role.value}, expires_delta=access_token_expires)
+    new_refresh = create_refresh_token(user_id=user.id)
+    return {"access_token": access_token, "token_type": "bearer", "refresh_token": new_refresh}

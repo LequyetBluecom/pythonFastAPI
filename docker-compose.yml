@@ -9,3 +9,24 @@ services:
       - .:/app
     env_file:
       - .env
+    environment:
+      - DATABASE_URL=mysql+pymysql://root:example@mysql:3306/school_payment_db
+      - ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://localhost:5000,http://127.0.0.1:5000
+    depends_on:
+      - mysql
+
+  mysql:
+    image: mysql:8.0
+    container_name: school_mysql
+    restart: always
+    environment:
+      - MYSQL_ROOT_PASSWORD=example
+      - MYSQL_DATABASE=school_payment_db
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./db/mysql_bootstrap.sql:/docker-entrypoint-initdb.d/01-bootstrap.sql:ro
+
+volumes:
+  mysql_data:

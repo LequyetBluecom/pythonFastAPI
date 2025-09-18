@@ -208,6 +208,33 @@ Trân trọng,
         except Exception as e:
             print(f"Error sending payment reminders: {e}")
             return False
+    
+    def send_password_reset(self, recipient_email: str, recipient_name: str, reset_url: str) -> bool:
+        """Gửi email đặt lại mật khẩu"""
+        try:
+            subject = "Đặt lại mật khẩu"
+            html_content = f"""
+            <p>Xin chào {recipient_name},</p>
+            <p>Bạn đã yêu cầu đặt lại mật khẩu. Vui lòng nhấn vào liên kết dưới đây để đặt lại:</p>
+            <p><a href=\"{reset_url}\">Đặt lại mật khẩu</a></p>
+            <p>Nếu bạn không yêu cầu, vui lòng bỏ qua email này.</p>
+            """.strip()
+            
+            msg = MIMEMultipart('alternative')
+            msg['Subject'] = subject
+            msg['From'] = f"{self.sender_name} <{self.sender_email}>"
+            msg['To'] = recipient_email
+            msg.attach(MIMEText(html_content, 'html', 'utf-8'))
+            
+            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+                server.starttls()
+                if self.smtp_username and self.smtp_password:
+                    server.login(self.smtp_username, self.smtp_password)
+                server.send_message(msg)
+            return True
+        except Exception as e:
+            print(f"Error sending password reset email: {e}")
+            return False
             
     def _ensure_email_templates(self):
         """Tạo các email template cơ bản"""

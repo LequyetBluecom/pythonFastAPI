@@ -96,6 +96,7 @@ class InvoiceResponse(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+    refresh_token: str | None = None
 
 class TokenData(BaseModel):
     email: Optional[str] = None
@@ -103,6 +104,19 @@ class TokenData(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+
+
+# Auth extended
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
 
 # QR Code response
 class QRCodeResponse(BaseModel):

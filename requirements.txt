@@ -14,5 +14,6 @@ qrcode
 sqlalchemy
 requests
 pydantic-settings
+PyMySQL
 # Optional (for PDF invoice rendering). On Windows requires extra native deps.
 # weasyprint

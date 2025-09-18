@@ -1,6 +1,6 @@
 -- =====================================================
 -- MySQL Database Bootstrap Script
--- Hệ thống Thanh toán QR Trường học
+-- Hệ thống Thanh toán QR Trường học (FULL)
 -- =====================================================
 
 -- Tạo database
@@ -11,7 +11,7 @@ COLLATE utf8mb4_unicode_ci;
 USE school_payment_db;
 
 -- =====================================================
--- Tạo bảng users
+-- Bảng users
 -- =====================================================
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS users (
 ) ENGINE=InnoDB;
 
 -- =====================================================
--- Tạo bảng students
+-- Bảng students
 -- =====================================================
 CREATE TABLE IF NOT EXISTS students (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -44,7 +44,19 @@ CREATE TABLE IF NOT EXISTS students (
 ) ENGINE=InnoDB;
 
 -- =====================================================
--- Tạo bảng orders
+-- Bảng fees (khoản phí chuẩn)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS fees (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    default_amount DECIMAL(12,2) NOT NULL,
+    fee_type ENUM('hoc_phi','dong_phuc','ngoai_khoa','khac') DEFAULT 'hoc_phi',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+-- =====================================================
+-- Bảng orders
 -- =====================================================
 CREATE TABLE IF NOT EXISTS orders (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -55,7 +67,9 @@ CREATE TABLE IF NOT EXISTS orders (
     status ENUM('pending', 'paid', 'invoiced') DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     due_date TIMESTAMP NULL,
+    fee_id INT NULL,
     FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+    FOREIGN KEY (fee_id) REFERENCES fees(id) ON DELETE SET NULL,
     INDEX idx_order_code (order_code),
     INDEX idx_student_id (student_id),
     INDEX idx_status (status),
@@ -63,7 +77,7 @@ CREATE TABLE IF NOT EXISTS orders (
 ) ENGINE=InnoDB;
 
 -- =====================================================
--- Tạo bảng payments
+-- Bảng payments
 -- =====================================================
 CREATE TABLE IF NOT EXISTS payments (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -84,7 +98,7 @@ CREATE TABLE IF NOT EXISTS payments (
 ) ENGINE=InnoDB;
 
 -- =====================================================
--- Tạo bảng invoices
+-- Bảng invoices
 -- =====================================================
 CREATE TABLE IF NOT EXISTS invoices (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -102,6 +116,9 @@ CREATE TABLE IF NOT EXISTS invoices (
     xml_path VARCHAR(255),
     issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    email_sent BOOLEAN DEFAULT FALSE,
+    email_sent_at TIMESTAMP NULL,
+    xml_checksum VARCHAR(128) NULL,
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
     INDEX idx_invoice_number (invoice_number),
     INDEX idx_order_id (order_id),
@@ -109,23 +126,7 @@ CREATE TABLE IF NOT EXISTS invoices (
 ) ENGINE=InnoDB;
 
 -- =====================================================
--- Tạo bảng printers
--- =====================================================
-CREATE TABLE IF NOT EXISTS printers (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    location VARCHAR(100),
-    ip_address VARCHAR(50),
-    printer_type VARCHAR(50),
-    agent_id INT,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_name (name),
-    INDEX idx_is_active (is_active)
-) ENGINE=InnoDB;
-
--- =====================================================
--- Tạo bảng printer_agents
+-- Bảng printer_agents
 -- =====================================================
 CREATE TABLE IF NOT EXISTS printer_agents (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -140,7 +141,24 @@ CREATE TABLE IF NOT EXISTS printer_agents (
 ) ENGINE=InnoDB;
 
 -- =====================================================
--- Tạo bảng print_jobs
+-- Bảng printers
+-- =====================================================
+CREATE TABLE IF NOT EXISTS printers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    location VARCHAR(100),
+    ip_address VARCHAR(50),
+    printer_type VARCHAR(50),
+    agent_id INT,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (agent_id) REFERENCES printer_agents(id) ON DELETE SET NULL,
+    INDEX idx_name (name),
+    INDEX idx_is_active (is_active)
+) ENGINE=InnoDB;
+
+-- =====================================================
+-- Bảng print_jobs
 -- =====================================================
 CREATE TABLE IF NOT EXISTS print_jobs (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -159,18 +177,50 @@ CREATE TABLE IF NOT EXISTS print_jobs (
 ) ENGINE=InnoDB;
 
 -- =====================================================
--- Thêm foreign key cho printers.agent_id
+-- Bảng system_configs
 -- =====================================================
-ALTER TABLE printers 
-ADD CONSTRAINT fk_printers_agent_id 
-FOREIGN KEY (agent_id) REFERENCES printer_agents(id) ON DELETE SET NULL;
+CREATE TABLE IF NOT EXISTS system_configs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    config_key VARCHAR(100) UNIQUE NOT NULL,
+    config_value TEXT NOT NULL,
+    description VARCHAR(255),
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
 
 -- =====================================================
--- INSERT DỮ LIỆU MẪU
+-- Bảng system_logs
 -- =====================================================
+CREATE TABLE IF NOT EXISTS system_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NULL,
+    action VARCHAR(100) NOT NULL,
+    message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
 
--- Tạo users mẫu với bcrypt hash
--- Mật khẩu: Admin@123, Accountant@123, Teacher@123, Parent@123
+-- =====================================================
+-- Bảng roles và user_roles
+-- =====================================================
+CREATE TABLE IF NOT EXISTS roles (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(50) UNIQUE NOT NULL,
+    description VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS user_roles (
+    user_id INT NOT NULL,
+    role_id INT NOT NULL,
+    assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, role_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- =====================================================
+-- Dữ liệu mẫu
+-- =====================================================
 INSERT INTO users (name, email, phone, role, hashed_password, is_active) VALUES
 ('Nguyễn Văn Admin', 'admin@school.edu.vn', '0901234567', 'admin', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj4J/5Kz8K2O', TRUE),
 ('Trần Thị Kế Toán', 'accountant@school.edu.vn', '0901234568', 'accountant', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj4J/5Kz8K2O', TRUE),
@@ -178,14 +228,12 @@ INSERT INTO users (name, email, phone, role, hashed_password, is_active) VALUES
 ('Phạm Thị Phụ Huynh', 'parent1@email.com', '0901234570', 'parent', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj4J/5Kz8K2O', TRUE),
 ('Hoàng Văn Phụ Huynh 2', 'parent2@email.com', '0901234571', 'parent', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj4J/5Kz8K2O', TRUE);
 
--- Tạo students mẫu
 INSERT INTO students (user_id, name, student_code, class_name, grade) VALUES
 (4, 'Phạm Minh Anh', 'HS001', '1A', '1'),
 (4, 'Phạm Thị Bình', 'HS002', '2B', '2'),
 (5, 'Hoàng Văn Cường', 'HS003', '3A', '3'),
 (5, 'Hoàng Thị Dung', 'HS004', '4B', '4');
 
--- Tạo orders mẫu
 INSERT INTO orders (student_id, order_code, description, amount, status, due_date) VALUES
 (1, 'ORD-ABC12345', 'Học phí tháng 1/2024', 500000.00, 'pending', '2024-02-15 23:59:59'),
 (1, 'ORD-ABC12346', 'Phí đồng phục học sinh', 200000.00, 'pending', '2024-02-20 23:59:59'),
@@ -193,37 +241,42 @@ INSERT INTO orders (student_id, order_code, description, amount, status, due_dat
 (3, 'ORD-ABC12348', 'Học phí tháng 1/2024', 500000.00, 'pending', '2024-02-15 23:59:59'),
 (4, 'ORD-ABC12349', 'Học phí tháng 1/2024', 500000.00, 'paid', '2024-02-15 23:59:59');
 
--- Tạo payments mẫu
 INSERT INTO payments (order_id, payment_code, gateway_txn_id, amount, status, payment_method, qr_code_data, paid_at) VALUES
 (3, 'TXN-PAY12345', 'GATEWAY-TXN-001', 500000.00, 'success', 'QR_CODE', 'VIETQR|demo-merchant|TXN-PAY12345|500000|VND|Học phí tháng 1/2024', '2024-01-15 10:30:00'),
 (5, 'TXN-PAY12346', 'GATEWAY-TXN-002', 500000.00, 'success', 'QR_CODE', 'VIETQR|demo-merchant|TXN-PAY12346|500000|VND|Học phí tháng 1/2024', '2024-01-16 14:20:00');
 
--- Tạo invoices mẫu
 INSERT INTO invoices (order_id, invoice_number, invoice_code, e_invoice_code, customer_name, customer_tax_code, customer_address, amount, tax_amount, total_amount, pdf_path, xml_path) VALUES
 (3, 'HD20240115001', 'C25TTA240115ABC123', 'TCT12345678', 'Phạm Thị Phụ Huynh', '', '', 500000.00, 0.00, 500000.00, 'invoices/pdf/invoice_1.pdf', 'invoices/xml/invoice_1.xml'),
 (5, 'HD20240116001', 'C25TTA240116DEF456', 'TCT87654321', 'Hoàng Văn Phụ Huynh 2', '', '', 500000.00, 0.00, 500000.00, 'invoices/pdf/invoice_2.pdf', 'invoices/xml/invoice_2.xml');
 
--- Tạo printer_agents mẫu
 INSERT INTO printer_agents (host_id, host_name, jwt_token, last_seen, is_active) VALUES
 ('AGENT-001', 'Máy in phòng kế toán', 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...', '2024-01-20 09:00:00', TRUE),
 ('AGENT-002', 'Máy in phòng hiệu trưởng', 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...', '2024-01-20 08:30:00', TRUE);
 
--- Tạo printers mẫu
 INSERT INTO printers (name, location, ip_address, printer_type, agent_id, is_active) VALUES
 ('HP LaserJet Pro M404n', 'Phòng kế toán', '192.168.1.100', 'LASER', 1, TRUE),
 ('Canon PIXMA G3110', 'Phòng hiệu trưởng', '192.168.1.101', 'INKJET', 2, TRUE);
 
--- Tạo print_jobs mẫu
 INSERT INTO print_jobs (printer_id, invoice_id, job_data, status, sent_at, completed_at) VALUES
 (1, 1, '{"invoice_id": 1, "printer_id": 1, "copies": 1, "paper_size": "A4"}', 'completed', '2024-01-15 10:35:00', '2024-01-15 10:36:00'),
 (2, 2, '{"invoice_id": 2, "printer_id": 2, "copies": 2, "paper_size": "A4"}', 'completed', '2024-01-16 14:25:00', '2024-01-16 14:26:00');
 
--- =====================================================
--- Tạo views hữu ích
--- =====================================================
+-- Roles
+INSERT IGNORE INTO roles (name, description) VALUES
+('admin', 'Quản trị hệ thống'),
+('accountant', 'Kế toán'),
+('teacher', 'Giáo vụ'),
+('parent', 'Phụ huynh');
 
--- View tổng hợp thông tin học sinh và phụ huynh
-CREATE VIEW v_student_parent_info AS
+-- Gán role cho user đã có
+INSERT IGNORE INTO user_roles (user_id, role_id)
+SELECT u.id, r.id FROM users u 
+JOIN roles r ON u.role = r.name;
+
+-- =====================================================
+-- Views
+-- =====================================================
+CREATE OR REPLACE VIEW v_student_parent_info AS
 SELECT 
     s.id as student_id,
     s.name as student_name,
@@ -237,8 +290,7 @@ SELECT
 FROM students s
 JOIN users u ON s.user_id = u.id;
 
--- View tổng hợp đơn hàng và thanh toán
-CREATE VIEW v_order_payment_info AS
+CREATE OR REPLACE VIEW v_order_payment_info AS
 SELECT 
     o.id as order_id,
     o.order_code,
@@ -267,12 +319,10 @@ LEFT JOIN payments p ON o.id = p.order_id
 LEFT JOIN invoices i ON o.id = i.order_id;
 
 -- =====================================================
--- Tạo stored procedures hữu ích
+-- Stored Procedures
 -- =====================================================
-
 DELIMITER //
 
--- Procedure tạo báo cáo doanh thu theo thời gian
 CREATE PROCEDURE sp_revenue_report(
     IN start_date DATE,
     IN end_date DATE
@@ -291,7 +341,6 @@ BEGIN
     ORDER BY payment_date;
 END //
 
--- Procedure tạo báo cáo thu học phí theo lớp
 CREATE PROCEDURE sp_collection_by_class()
 BEGIN
     SELECT 
@@ -313,25 +362,20 @@ END //
 DELIMITER ;
 
 -- =====================================================
--- Tạo indexes bổ sung để tối ưu performance
+-- Indexes bổ sung
 -- =====================================================
-
--- Index cho tìm kiếm theo thời gian
 CREATE INDEX idx_payments_paid_at ON payments(paid_at);
 CREATE INDEX idx_orders_created_at ON orders(created_at);
 CREATE INDEX idx_invoices_issued_at ON invoices(issued_at);
 
--- Index cho tìm kiếm theo trạng thái
 CREATE INDEX idx_orders_status_created ON orders(status, created_at);
 CREATE INDEX idx_payments_status_created ON payments(status, created_at);
 
 -- =====================================================
--- Tạo triggers để tự động cập nhật
+-- Triggers
 -- =====================================================
-
 DELIMITER //
 
--- Trigger cập nhật order status khi payment thành công
 CREATE TRIGGER tr_payment_success_update_order
 AFTER UPDATE ON payments
 FOR EACH ROW
@@ -343,7 +387,6 @@ BEGIN
     END IF;
 END //
 
--- Trigger cập nhật order status khi tạo invoice
 CREATE TRIGGER tr_invoice_created_update_order
 AFTER INSERT ON invoices
 FOR EACH ROW
@@ -356,17 +399,6 @@ END //
 DELIMITER ;
 
 -- =====================================================
--- Tạo user cho ứng dụng (tùy chọn)
--- =====================================================
-
--- Tạo user riêng cho ứng dụng (không bắt buộc)
--- CREATE USER 'school_payment_app'@'localhost' IDENTIFIED BY 'secure_password_here';
--- GRANT SELECT, INSERT, UPDATE, DELETE ON school_payment_db.* TO 'school_payment_app'@'localhost';
--- FLUSH PRIVILEGES;
-
--- =====================================================
 -- Kết thúc script
 -- =====================================================
-
-SELECT 'Database và dữ liệu mẫu đã được tạo thành công!' as message;
-SELECT 'Có thể kết nối với MySQL bằng: mysql://localhost:3306/school_payment_db' as connection_info;
+SELECT 'Database và dữ liệu mẫu FULL đã được tạo thành công!' as message;

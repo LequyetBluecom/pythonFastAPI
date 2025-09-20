@@ -15,6 +15,18 @@ if settings.database_url.startswith("sqlite"):
         connect_args={"check_same_thread": False},
         echo=settings.DB_ECHO
     )
+elif settings.database_url.startswith("mysql"):
+    # MySQL database with proper connection args
+    engine = create_engine(
+        settings.database_url,
+        echo=settings.DB_ECHO,
+        pool_pre_ping=True,
+        pool_recycle=300,
+        connect_args={
+            "charset": "utf8mb4",
+            "autocommit": True
+        }
+    )
 else:
     # PostgreSQL or other databases
     engine = create_engine(

@@ -38,11 +38,12 @@ router = APIRouter()
 })
 def login(request: LoginRequest, db: Session = Depends(get_db)):
     """Đăng nhập và trả về access token"""
-    # Chỉ cho phép Admin lấy token hệ thống
-    admin = db.query(User).filter(User.email == request.email).first()
-    if not admin or admin.role != UserRole.ADMIN:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Chỉ Admin được phép lấy token")
+    # Tìm user
     user = db.query(User).filter(User.email == request.email).first()
+    
+    # Chỉ cho phép Admin lấy token hệ thống
+    if not user or user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Chỉ Admin được phép lấy token")
     
     if not user or not verify_password(request.password, user.hashed_password):
         raise HTTPException(

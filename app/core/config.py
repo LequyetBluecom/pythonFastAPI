@@ -63,6 +63,11 @@ class Settings(BaseSettings):
         if self.DATABASE_URL:
             return self.DATABASE_URL
         return "sqlite:///./school_payment.db"
+    
+    @property
+    def is_mysql(self) -> bool:
+        """Check if using MySQL database"""
+        return self.database_url.startswith("mysql")
 
     @property
     def is_production(self) -> bool:
